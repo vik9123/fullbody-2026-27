@@ -19,6 +19,7 @@ data class DayPlan(
     val heavy: Boolean,
     val warmupExtra: String,
     val exercises: List<ExerciseDef>,
+    val circuit: Boolean = false,
 )
 
 object Program {
@@ -102,6 +103,7 @@ object Program {
                 ExerciseDef("Разведения гантелей в стороны", 3, 12, 15, 60, "Средняя дельта",
                     "Ведёте локтем, не кистью, до уровня плеч. Корпус неподвижен — помогаете телом, значит вес велик."),
             ),
+            circuit = true,
         ),
     )
 

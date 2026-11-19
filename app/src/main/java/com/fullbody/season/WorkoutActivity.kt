@@ -59,10 +59,14 @@ class WorkoutActivity : AppCompatActivity() {
         val container = findViewById<LinearLayout>(R.id.exerciseContainer)
         container.addView(warmupCard(plan.warmupExtra))
         val last = LogStore.lastSessionBefore(this, dayId, LocalDate.now().toString())
-        plan.exercises.forEachIndexed { index, ex ->
-            val targetSets = Program.setsForWeek(ex.sets, cycleWeek)
-            val prev = last?.exercises?.firstOrNull { it.name == ex.name }
-            container.addView(exerciseCard(index + 1, ex, targetSets, plan.heavy, prev))
+        if (plan.circuit) {
+            buildCircuit(container, plan, cycleWeek, last)
+        } else {
+            plan.exercises.forEachIndexed { index, ex ->
+                val targetSets = Program.setsForWeek(ex.sets, cycleWeek)
+                val prev = last?.exercises?.firstOrNull { it.name == ex.name }
+                container.addView(exerciseCard(index + 1, ex, targetSets, plan.heavy, prev))
+            }
         }
 
         findViewById<View>(R.id.finishButton).setOnClickListener { finishWorkout(plan.id) }
@@ -217,6 +221,105 @@ class WorkoutActivity : AppCompatActivity() {
 
     private fun formatWeight(v: Float): String =
         if (v % 1f == 0f) v.toInt().toString() else v.toString()
+
+    /** Круговой режим: упражнения цепочкой, по одному подходу, 60 с между ними, 90 с между кругами. */
+    private fun buildCircuit(
+        container: LinearLayout,
+        plan: com.fullbody.season.data.DayPlan,
+        cycleWeek: Int,
+        last: LogStore.Session?,
+    ) {
+        val rounds = plan.exercises.first().let { Program.setsForWeek(it.sets, cycleWeek) }
+        for (round in 1..rounds) {
+            container.addView(TextView(this).apply {
+                text = "Круг $round из $rounds"
+                setTextColor(getColor(R.color.accent))
+                textSize = 18f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setPadding(0, dp(10), 0, dp(8))
+            })
+            plan.exercises.forEachIndexed { idx, ex ->
+                val prevSet = last?.exercises
+                    ?.firstOrNull { it.name == ex.name }
+                    ?.sets?.getOrNull(round - 1)
+                val isLastInRound = idx == plan.exercises.size - 1
+                val isDropRound = round == rounds && ex.technique.contains("дроп-сет")
+                container.addView(circuitRow(round, idx + 1, ex, prevSet, isLastInRound, isDropRound))
+            }
+        }
+    }
+
+    private fun circuitRow(
+        round: Int,
+        number: Int,
+        ex: ExerciseDef,
+        prevSet: LogStore.SetLog?,
+        isLastInRound: Boolean,
+        isDropRound: Boolean,
+    ): View {
+        val card = baseCard()
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+        }
+        val repsText = if (ex.repsMin == ex.repsMax) "${ex.repsMax}" else "${ex.repsMin}–${ex.repsMax}"
+        val restText = if (isLastInRound) "90 с после круга" else "60 с"
+        col.addView(TextView(this).apply {
+            text = "$number. ${ex.name}"
+            setTextColor(getColor(R.color.text))
+            textSize = 15f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setOnClickListener {
+                android.app.AlertDialog.Builder(this@WorkoutActivity)
+                    .setTitle(ex.name)
+                    .setMessage(ex.technique)
+                    .setPositiveButton("Понятно", null)
+                    .show()
+            }
+        })
+        col.addView(TextView(this).apply {
+            text = "$repsText повт · отдых $restText" + (if (isDropRound) " · ДРОП-СЕТ 6-8-10" else "")
+            setTextColor(if (isDropRound) getColor(R.color.accent) else getColor(R.color.text_dim))
+            textSize = 13f
+            setPadding(0, dp(2), 0, dp(4))
+        })
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val weight = EditText(this).apply {
+            hint = "кг"
+            setHintTextColor(getColor(R.color.text_dim))
+            setTextColor(getColor(R.color.text))
+            textSize = 15f
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            gravity = Gravity.CENTER
+            if (prevSet != null && prevSet.weight > 0f) setText(formatWeight(prevSet.weight))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val reps = EditText(this).apply {
+            hint = "повт"
+            setHintTextColor(getColor(R.color.text_dim))
+            setTextColor(getColor(R.color.text))
+            textSize = 15f
+            inputType = InputType.TYPE_CLASS_NUMBER
+            gravity = Gravity.CENTER
+            if (prevSet != null && prevSet.reps > 0) setText(prevSet.reps.toString())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val done = CheckBox(this).apply {
+            setOnCheckedChangeListener { _, checked ->
+                if (checked) startTimer(if (isLastInRound) 90 else ex.restSec, ex.name)
+            }
+        }
+        row.addView(weight)
+        row.addView(reps)
+        row.addView(done)
+        col.addView(row)
+        card.addView(col)
+        rows.add(SetRow(ex, weight, reps, done))
+        return card
+    }
 
     private fun startTimer(seconds: Int, label: String) {
         timer?.cancel()
